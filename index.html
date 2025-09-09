@@ -1,0 +1,425 @@
+<!doctype html>
+<html lang="pl" data-ld-theme="theme-default">
+    <head>
+        <meta charset="utf-8"/>
+        <meta name="viewport" content="width=device-width, initial-scale=1"/>
+        <title>Koszyk płatności – Korki AI</title>
+        <link rel="icon" href="/favicon.png"/>
+        <link rel="preconnect" href="https://fonts.googleapis.com">
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <!-- Style głównej strony (spójność UI) -->
+        <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+        <!-- Style koszyka -->
+        <link rel="stylesheet" href="./styles.css"/>
+        <script src="https://js.stripe.com/v3" defer></script>
+        <script defer>
+      let stripe;
+      let elements;
+      let clientSecret;
+      let selectedPlanKey = 'standard';
+      let nipTimeout;
+      let companyData = null;
+
+      const plans = {
+        standard: { label: 'Standard', amount: 14900 },
+        premium: { label: 'Premium', amount: 29900 },
+        vip: { label: 'VIP', amount: 49900 }
+      };
+
+      async function fetchConfig() {
+        const res = await fetch('./config.php');
+        if (!res.ok) throw new Error('Błąd pobierania konfiguracji');
+        const cfg = await res.json();
+        if (!cfg.publishableKey) throw new Error('Brak publishableKey');
+        stripe = Stripe(cfg.publishableKey, { locale: 'pl' });
+      }
+
+      async function createPaymentIntent(selectedKey, email, fullName, nip) {
+        const plan = plans[selectedKey];
+        const payload = {
+          plan: selectedKey,
+          amount: plan.amount,
+          email,
+          full_name: fullName,
+          nip
+        };
+        
+        // Dodaj dane firmowe jeśli są dostępne
+        if (companyData) {
+          payload.company_name = companyData.name;
+          payload.company_address = companyData.workingAddress || companyData.residenceAddress;
+          payload.vat_status = companyData.vatStatus;
+          payload.regon = companyData.regon;
+          payload.krs = companyData.krs;
+        }
+        
+        const res = await fetch('./create-intent.php', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || 'Błąd tworzenia płatności');
+        return data.client_secret;
+      }
+
+      async function mountElements(secret) {
+        clientSecret = secret;
+        const appearance = {
+          theme: 'stripe',
+          variables: {
+            colorPrimary: getComputedStyle(document.documentElement).getPropertyValue('--bs-primary-700').trim() || '#1D7D57'
+          }
+        };
+        elements = stripe.elements({ clientSecret, appearance });
+        const paymentElement = elements.create('payment', {
+          layout: { type: 'tabs' },
+          fields: { billingDetails: { name: 'never', email: 'never' } },
+          paymentMethodOrder: ['blik', 'p24', 'card', 'klarna', 'google_pay', 'apple_pay'],
+          wallets: {
+            applePay: 'auto',
+            googlePay: 'auto'
+          }
+        });
+        paymentElement.mount('#payment-element');
+        document.getElementById('pay-section').classList.remove('hidden');
+      }
+
+      async function onSelectPlan(selectedKey) {
+        try {
+          document.querySelectorAll('.plan-btn').forEach(b => b.classList.remove('active'));
+          document.getElementById(`plan-${selectedKey}`).classList.add('active');
+          selectedPlanKey = selectedKey;
+          document.getElementById('selected-plan').textContent = plans[selectedKey].label;
+          document.getElementById('left-price').textContent = (plans[selectedKey].amount / 100).toFixed(2) + ' PLN';
+          document.getElementById('submit').textContent = `Płacę ${(plans[selectedKey].amount/100).toFixed(0)} zł`;
+
+          // Pokaż sekcję płatności i utwórz Payment Element od razu
+          document.getElementById('pay-section').classList.remove('hidden');
+          
+          // Utwórz Payment Element od razu po wyborze planu
+          if (!stripe) await fetchConfig();
+          if (!elements) {
+            const email = document.getElementById('email').value.trim() || 'temp@example.com'; // tymczasowy email
+            const secret = await createPaymentIntent(selectedKey, email, '', '');
+            await mountElements(secret);
+          }
+        } catch (err) {
+          console.error(err);
+          alert(err.message || 'Wystąpił błąd. Spróbuj ponownie.');
+        }
+      }
+
+      async function onSubmitPayment(e) {
+        e.preventDefault();
+        const email = document.getElementById('email').value.trim();
+        const fullName = document.getElementById('full-name').value.trim();
+        const nip = document.getElementById('nip').value.trim();
+        const accepted = document.getElementById('accept').checked;
+        
+        if (!email) {
+          alert('Podaj adres e-mail.');
+          return;
+        }
+        if (!accepted) {
+          alert('Aby kontynuować, zaakceptuj regulamin i zgodę na przetwarzanie danych.');
+          return;
+        }
+
+        if (!stripe || !elements) {
+          alert('Błąd inicjalizacji płatności. Odśwież stronę i spróbuj ponownie.');
+          return;
+        }
+        const { error } = await stripe.confirmPayment({
+          elements,
+          confirmParams: {
+            return_url: window.location.origin + window.location.pathname.replace('index.html', '') + 'thankyoupage.html',
+            receipt_email: email,
+            payment_method_data: { 
+              billing_details: { 
+                name: fullName,
+                email: email
+              } 
+            }
+          }
+        });
+        if (error) {
+          const msg = document.getElementById('payment-message');
+          msg.textContent = error.message || 'Nie udało się potwierdzić płatności.';
+          msg.classList.add('error');
+        }
+      }
+
+      async function updatePaymentIntent() {
+        if (!elements || !selectedPlanKey) return;
+        try {
+          const email = document.getElementById('email').value.trim() || 'temp@example.com';
+          const fullName = document.getElementById('full-name').value.trim();
+          const nip = document.getElementById('nip').value.trim();
+          const secret = await createPaymentIntent(selectedPlanKey, email, fullName, nip);
+          // Aktualizuj istniejący PaymentIntent
+          elements.update({ clientSecret: secret });
+        } catch (err) {
+          console.error('Błąd aktualizacji płatności:', err);
+        }
+      }
+
+      // Funkcje do obsługi NIP-u i danych firmowych
+      function validateNIPFormat(nip) {
+        // Usuń wszystkie znaki oprócz cyfr
+        const cleanNip = nip.replace(/[^0-9]/g, '');
+        
+        // NIP musi mieć 10 cyfr
+        if (cleanNip.length !== 10) {
+          return false;
+        }
+        
+        // Walidacja sumy kontrolnej NIP-u
+        const weights = [6, 5, 7, 2, 3, 4, 5, 6, 7];
+        let sum = 0;
+        
+        for (let i = 0; i < 9; i++) {
+          sum += parseInt(cleanNip[i]) * weights[i];
+        }
+        
+        const checksum = sum % 11;
+        if (checksum === 10) {
+          return false;
+        }
+        
+        return parseInt(cleanNip[9]) === checksum;
+      }
+
+      function showNIPError(message) {
+        const errorDiv = document.getElementById('nip-error');
+        errorDiv.textContent = message;
+        errorDiv.classList.remove('hidden');
+      }
+
+      function hideNIPError() {
+        const errorDiv = document.getElementById('nip-error');
+        errorDiv.classList.add('hidden');
+      }
+
+      function showNIPLoader() {
+        document.getElementById('nip-loader').classList.remove('hidden');
+      }
+
+      function hideNIPLoader() {
+        document.getElementById('nip-loader').classList.add('hidden');
+      }
+
+      function showCompanyFields(data) {
+        const companyFields = document.getElementById('company-fields');
+        const companyName = document.getElementById('company-name');
+        const companyAddress = document.getElementById('company-address');
+        const vatStatus = document.getElementById('vat-status');
+
+        // Wypełnij pola danymi
+        companyName.value = data.name || '';
+        companyAddress.value = data.workingAddress || data.residenceAddress || '';
+        vatStatus.value = data.vatStatus || 'Nieznany';
+
+        // Pokaż sekcję z danymi firmowymi
+        companyFields.classList.remove('hidden');
+        companyFields.classList.add('loaded');
+        
+        // Zapisz dane firmowe
+        companyData = data;
+      }
+
+      function hideCompanyFields() {
+        const companyFields = document.getElementById('company-fields');
+        companyFields.classList.add('hidden');
+        companyFields.classList.remove('loaded');
+        
+        // Wyczyść pola
+        document.getElementById('company-name').value = '';
+        document.getElementById('company-address').value = '';
+        document.getElementById('vat-status').value = '';
+        
+        companyData = null;
+      }
+
+      async function fetchCompanyData(nip) {
+        try {
+          const response = await fetch('./get-company-data.php', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ nip: nip })
+          });
+
+          const result = await response.json();
+
+          if (!response.ok) {
+            throw new Error(result.error || 'Błąd pobierania danych');
+          }
+
+          if (result.success && result.data) {
+            showCompanyFields(result.data);
+            hideNIPError();
+          } else {
+            throw new Error('Nie znaleziono danych dla podanego NIP-u');
+          }
+
+        } catch (error) {
+          console.error('Błąd pobierania danych firmy:', error);
+          showNIPError(error.message);
+          hideCompanyFields();
+        } finally {
+          hideNIPLoader();
+        }
+      }
+
+      function onNIPInput(event) {
+        const nip = event.target.value.trim();
+        
+        // Wyczyść poprzedni timeout
+        if (nipTimeout) {
+          clearTimeout(nipTimeout);
+        }
+        
+        // Ukryj błędy i dane firmowe
+        hideNIPError();
+        hideNIPLoader();
+        
+        // Jeśli pole jest puste, ukryj dane firmowe
+        if (!nip) {
+          hideCompanyFields();
+          return;
+        }
+        
+        // Sprawdź format NIP-u
+        if (!validateNIPFormat(nip)) {
+          showNIPError('Nieprawidłowy format NIP-u. Przykład: 123-456-32-18');
+          hideCompanyFields();
+          return;
+        }
+        
+        // Ustaw timeout na pobieranie danych (debounce)
+        nipTimeout = setTimeout(() => {
+          showNIPLoader();
+          fetchCompanyData(nip);
+        }, 800); // 800ms opóźnienia
+      }
+
+      window.addEventListener('DOMContentLoaded', () => {
+        const img = document.getElementById('product-img');
+        if (img) {
+          img.addEventListener('error', () => {
+            img.src = '/assets/images/platnosc.jpg';
+          });
+        }
+        document.getElementById('plan-standard').addEventListener('click', () => onSelectPlan('standard'));
+        document.getElementById('plan-premium').addEventListener('click', () => onSelectPlan('premium'));
+        document.getElementById('plan-vip').addEventListener('click', () => onSelectPlan('vip'));
+        document.getElementById('payment-form').addEventListener('submit', onSubmitPayment);
+        
+        // Aktualizuj PaymentIntent gdy użytkownik zmieni dane
+        document.getElementById('email').addEventListener('blur', updatePaymentIntent);
+        document.getElementById('full-name').addEventListener('blur', updatePaymentIntent);
+        document.getElementById('nip').addEventListener('blur', updatePaymentIntent);
+        
+        // Obsługa NIP-u - pobieranie danych firmowych
+        document.getElementById('nip').addEventListener('input', onNIPInput);
+        
+        // Ustawienia początkowe UI
+        onSelectPlan(selectedPlanKey);
+      });
+    </script>
+    </head>
+    <body>
+        <main class="container checkout">
+            <div class="row g-4">
+                <div class="col-lg-6">
+                    <section class="card checkout-card">
+                        <div class="product-head">
+                            <div class="brand">
+                                <img src="./assets/logo.svg" alt="Korki AI" class="logo"/>
+                                <div>
+                                    <h2 class="brand-title m-0">Kurs: AI dla młodzieży</h2>
+                                    <p class="brand-sub"></p>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="course-price">
+                            <span class="price-label">Cena:</span>
+                            <span class="price-value" id="left-price">149.00 PLN</span>
+                        </div>
+                        <div class="product-media">
+                            <img id="product-img" src="assets/zdjiecie%20platnosc%20korki.png" alt="Kurs"/>
+                        </div>
+                        <p class="muted">37+lekcji +100 promptami i dedykowa platforma społecznościowa</p>
+                        <div class="plans-list">
+                            <button id="plan-standard" class="btn plan-btn w-100 d-flex align-items-center justify-content-between"><span>Standard</span>
+                                <span>149 zł</span>
+                            </button>
+                            <button id="plan-premium" class="btn plan-btn w-100 d-flex align-items-center justify-content-between"><span>Premium</span>
+                                <span>299 zł</span>
+                            </button>
+                            <button id="plan-vip" class="btn plan-btn w-100 d-flex align-items-center justify-content-between">
+                                <span class="">VIP</span>&nbsp;<span>499 zł</span>
+                            </button>
+                        </div>
+                        <div class="made-by muted">
+                            Bezpieczne zakupy przez 
+                            <img src="./assets/8d57eac4b78e83e49793fb8503c6b82d.png" alt="Stripe" class="stripe-logo"/>
+                        </div>
+                    </section>
+                </div>
+                <div class="col-lg-6">
+                    <section class="card checkout-card">
+                        <h3 class="mb-2">Dane płatności</h3>
+                        <div class="summary">
+                            <div><span class="muted">Wybrano:</span><strong id="selected-plan">Standard</strong>
+                            </div>
+                        </div>
+                        <label class="field"><span>Adres email</span>
+                            <input type="email" id="email" placeholder="twoj@email.pl" required/>
+                        </label>
+                        <label class="field"><span>Imię i nazwisko</span>
+                            <input type="text" id="full-name" placeholder="Jan Kowalski"/>
+                        </label>
+                        <label class="field"><span>Numer NIP <small class="muted">(opcjonalnie - dane firmy zostaną uzupełnione automatycznie)</small></span>
+                            <div class="nip-input-wrapper">
+                                <input type="text" id="nip" placeholder="123-456-32-18"/>
+                                <div id="nip-loader" class="nip-loader hidden">
+                                    <div class="spinner"></div>
+                                </div>
+                            </div>
+                            <div id="nip-error" class="field-error hidden"></div>
+                        </label>
+                        <!-- Pola firmowe - pokazują się po wpisaniu NIP-u -->
+                        <div id="company-fields" class="company-fields hidden">
+                            <label class="field"><span>Nazwa firmy</span>
+                                <input type="text" id="company-name" placeholder="Nazwa firmy zostanie uzupełniona automatycznie" readonly/>
+                            </label>
+                            <label class="field"><span>Adres firmy</span>
+                                <textarea id="company-address" placeholder="Adres firmy zostanie uzupełniony automatycznie" readonly rows="2"></textarea>
+                            </label>
+                            <label class="field"><span>Status VAT</span>
+                                <input type="text" id="vat-status" placeholder="Status VAT" readonly/>
+                            </label>
+                        </div>
+                        <div id="pay-section" class="hidden">
+                            <label class="field"><span>Metoda płatności</span>
+                            </label>
+                            <div id="payment-element"></div>
+                        </div>
+                        <label class="checkbox">
+                            <input type="checkbox" id="accept"/><span>Zgadzam się z <a href="https://korkiai.pl/regulamin.html" target="_blank" rel="noopener noreferrer">regulaminem</a> i <a href="https://korkiai.pl/polityka-prywatnosci.html" target="_blank" rel="noopener noreferrer">polityką prywatności</a> oraz zapisaniem moich danych.</span>
+                        </label>
+                        <form id="payment-form">
+                            <button class="btn btn-primary btn-pay w-100" id="submit">Płacę 149 zł</button>
+                            <div id="payment-message" role="alert"></div>
+                        </form>
+                        <div class="guarantee"><i class="fa fa-shield-alt"></i><span>Kurs objęty 30 dniowa gwarancja zwrotu 100% środków</span>
+                        </div>
+                    </section>
+                </div>
+            </div>
+        </main>
+    </body>
+</html>
