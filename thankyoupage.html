@@ -1,0 +1,393 @@
+<!doctype html>
+<html lang="pl" data-ld-theme="theme-default">
+    <head>
+        <meta charset="utf-8"/>
+        <meta name="viewport" content="width=device-width, initial-scale=1"/>
+        <title>Dziękujemy za płatność – Korki AI</title>
+        <link rel="icon" href="/favicon.png"/>
+        <link rel="preconnect" href="https://fonts.googleapis.com">
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <!-- Style głównej strony (spójność UI) -->
+        <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+        <!-- Style koszyka -->
+        <link rel="stylesheet" href="./styles.css"/>
+        <script src="https://js.stripe.com/v3" defer></script>
+        <script defer>
+            async function init() {
+                const cfgRes = await fetch('./config.php');
+                const cfg = await cfgRes.json();
+                const stripe = Stripe(cfg.publishableKey, { locale: 'pl' });
+                const params = new URLSearchParams(window.location.search);
+                const clientSecret = params.get('payment_intent_client_secret');
+                const statusContainer = document.getElementById('payment-status');
+
+                if (!clientSecret) {
+                    statusContainer.innerHTML = '<div class="alert alert-warning"><i class="fa fa-exclamation-triangle"></i> Brak informacji o płatności.</div>';
+                    return;
+                }
+
+                try {
+                    const { paymentIntent } = await stripe.retrievePaymentIntent(clientSecret);
+                    switch (paymentIntent.status) {
+                        case 'succeeded':
+                            statusContainer.innerHTML = '<div class="alert alert-success"><i class="fa fa-check-circle"></i> Płatność zakończona sukcesem! 🎉</div>';
+                            break;
+                        case 'processing':
+                            statusContainer.innerHTML = '<div class="alert alert-info"><i class="fa fa-clock"></i> Płatność w trakcie przetwarzania...</div>';
+                            break;
+                        case 'requires_payment_method':
+                            statusContainer.innerHTML = '<div class="alert alert-danger"><i class="fa fa-times-circle"></i> Nieudana płatność. <a href="./index.html">Spróbuj ponownie</a>.</div>';
+                            break;
+                        default:
+                            statusContainer.innerHTML = `<div class="alert alert-info">Status: ${paymentIntent.status}</div>`;
+                    }
+                } catch (error) {
+                    console.error('Błąd pobierania statusu płatności:', error);
+                    statusContainer.innerHTML = '<div class="alert alert-warning"><i class="fa fa-exclamation-triangle"></i> Nie można pobrać statusu płatności.</div>';
+                }
+            }
+            window.addEventListener('DOMContentLoaded', init);
+        </script>
+        <style>
+            .thank-you-container {
+                max-width: 1200px;
+                margin: 0 auto;
+                padding: 24px;
+            }
+            
+            .thank-you-header {
+                text-align: center;
+                margin-bottom: 40px;
+            }
+            
+            .thank-you-title {
+                font-size: 2.5rem;
+                color: var(--bs-primary-700);
+                margin-bottom: 16px;
+                font-weight: 700;
+            }
+            
+            .thank-you-subtitle {
+                font-size: 1.2rem;
+                color: var(--bs-muted);
+                margin-bottom: 24px;
+            }
+            
+            .video-section {
+                background: var(--bs-card);
+                border: 1px solid var(--bs-border);
+                border-radius: 16px;
+                padding: 24px;
+                margin-bottom: 32px;
+                box-shadow: 0 6px 18px rgba(0,0,0,0.05);
+            }
+            
+            .video-container {
+                position: relative;
+                width: 100%;
+                height: 0;
+                padding-bottom: 56.25%; /* 16:9 aspect ratio */
+                margin-bottom: 24px;
+                border-radius: 12px;
+                overflow: hidden;
+                box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+            }
+            
+            .video-container iframe {
+                position: absolute;
+                top: 0;
+                left: 0;
+                width: 100%;
+                height: 100%;
+                border: none;
+            }
+            
+            .instructions-section {
+                background: var(--bs-primary-100);
+                border: 1px solid var(--bs-primary-200);
+                border-radius: 16px;
+                padding: 32px;
+                margin-bottom: 32px;
+            }
+            
+            .instructions-title {
+                font-size: 1.5rem;
+                color: var(--bs-primary-700);
+                margin-bottom: 24px;
+                text-align: center;
+            }
+            
+            .instruction-step {
+                display: flex;
+                align-items: flex-start;
+                gap: 16px;
+                margin-bottom: 20px;
+                padding: 16px;
+                background: #fff;
+                border-radius: 12px;
+                border: 1px solid var(--bs-primary-200);
+            }
+            
+            .step-number {
+                background: var(--bs-primary-700);
+                color: white;
+                width: 32px;
+                height: 32px;
+                border-radius: 50%;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                font-weight: 700;
+                font-size: 14px;
+                flex-shrink: 0;
+            }
+            
+            .step-content {
+                flex: 1;
+            }
+            
+            .step-title {
+                font-weight: 600;
+                color: var(--bs-dark-900);
+                margin-bottom: 8px;
+            }
+            
+            .step-description {
+                color: var(--bs-text);
+                line-height: 1.5;
+            }
+            
+            .alert {
+                padding: 16px;
+                border-radius: 12px;
+                margin-bottom: 16px;
+                display: flex;
+                align-items: center;
+                gap: 12px;
+            }
+            
+            .alert-success {
+                background: #d4edda;
+                border: 1px solid #c3e6cb;
+                color: #155724;
+            }
+            
+            .alert-warning {
+                background: #fff3cd;
+                border: 1px solid #ffeaa7;
+                color: #856404;
+            }
+            
+            .alert-danger {
+                background: #f8d7da;
+                border: 1px solid #f5c6cb;
+                color: #721c24;
+            }
+            
+            .alert-info {
+                background: #d1ecf1;
+                border: 1px solid #bee5eb;
+                color: #0c5460;
+            }
+            
+            .action-buttons {
+                display: flex;
+                gap: 16px;
+                justify-content: center;
+                flex-wrap: wrap;
+            }
+            
+            .btn-secondary {
+                background: var(--bs-muted);
+                color: white;
+                border: none;
+                border-radius: 12px;
+                padding: 12px 24px;
+                font-weight: 600;
+                text-decoration: none;
+                display: inline-flex;
+                align-items: center;
+                gap: 8px;
+                transition: all 0.2s ease;
+            }
+            
+            .btn-secondary:hover {
+                background: #5a5a5a;
+                color: white;
+                text-decoration: none;
+            }
+            
+            .platform-link {
+                background: var(--bs-primary-700);
+                color: white;
+                border: none;
+                border-radius: 12px;
+                padding: 16px 32px;
+                font-weight: 600;
+                text-decoration: none;
+                display: inline-flex;
+                align-items: center;
+                gap: 12px;
+                font-size: 16px;
+                transition: all 0.2s ease;
+                box-shadow: 0 4px 12px rgba(87, 63, 197, 0.3);
+            }
+            
+            .platform-link:hover {
+                background: var(--bs-primary-800);
+                color: white;
+                text-decoration: none;
+                transform: translateY(-2px);
+                box-shadow: 0 6px 16px rgba(87, 63, 197, 0.4);
+            }
+            
+            .email-info {
+                background: #fff;
+                border: 2px solid var(--bs-primary-200);
+                border-radius: 12px;
+                padding: 20px;
+                margin-top: 24px;
+                text-align: center;
+            }
+            
+            .email-info i {
+                color: var(--bs-primary-700);
+                font-size: 24px;
+                margin-bottom: 12px;
+            }
+            
+            @media (max-width: 768px) {
+                .thank-you-container {
+                    padding: 16px;
+                }
+                
+                .thank-you-title {
+                    font-size: 2rem;
+                }
+                
+                .video-section,
+                .instructions-section {
+                    padding: 20px;
+                }
+                
+                .instruction-step {
+                    flex-direction: column;
+                    text-align: center;
+                }
+                
+                .action-buttons {
+                    flex-direction: column;
+                    align-items: center;
+                }
+                
+                .platform-link,
+                .btn-secondary {
+                    width: 100%;
+                    justify-content: center;
+                }
+            }
+        </style>
+    </head>
+    <body>
+        <main class="thank-you-container">
+            <!-- Status płatności -->
+            <div id="payment-status"></div>
+            
+            <!-- Nagłówek podziękowania -->
+            <div class="thank-you-header">
+                <h1 class="thank-you-title">Dziękujemy za zakup! 🎉</h1>
+                <p class="thank-you-subtitle">Twoja płatność została pomyślnie przetworzona</p>
+            </div>
+            
+            <!-- Sekcja z filmem -->
+            <div class="video-section">
+                <h2 style="text-align: center; margin-bottom: 24px; color: var(--bs-dark-900);">
+                    <i class="fa fa-play-circle"></i> Instrukcja wideo
+                </h2>
+                <div class="video-container">
+                    <iframe 
+                        src='https://platforma.korkiai.pl/video/start/fullscreen-minimal-skin-white.html?UVPInstanceName=player1&UVPPlaylistId=0&UVPVideoId=0#/?playlistId=0&videoId=0' 
+                        frameborder='0' 
+                        scrolling='no' 
+                        allowfullscreen>
+                    </iframe>
+                </div>
+                <p style="text-align: center; color: var(--bs-muted); font-style: italic;">
+                    Obejrzyj film powyżej, aby dowiedzieć się, jak aktywować dostęp do platformy
+                </p>
+            </div>
+            
+            <!-- Sekcja z instrukcjami -->
+            <div class="instructions-section">
+                <h2 class="instructions-title">
+                    <i class="fa fa-list-ol"></i> Co dalej?
+                </h2>
+                
+                <div class="instruction-step">
+                    <div class="step-number">1</div>
+                    <div class="step-content">
+                        <div class="step-title">Sprawdź swoją skrzynkę e-mail</div>
+                        <div class="step-description">
+                            Wysłaliśmy na Twój adres e-mail wiadomość z kodem dostępu do platformy. 
+                            Sprawdź folder spam, jeśli nie widzisz wiadomości w głównej skrzynce.
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="instruction-step">
+                    <div class="step-number">2</div>
+                    <div class="step-content">
+                        <div class="step-title">Skopiuj kod dostępu</div>
+                        <div class="step-description">
+                            W e-mailu znajdziesz unikalny kod dostępu. Skopiuj go - będziesz go potrzebować 
+                            do zalogowania się na platformie.
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="instruction-step">
+                    <div class="step-number">3</div>
+                    <div class="step-content">
+                        <div class="step-title">Przejdź na platformę</div>
+                        <div class="step-description">
+                            Kliknij przycisk poniżej, aby przejść na platformę Korki AI i rozpocząć naukę.
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="instruction-step">
+                    <div class="step-number">4</div>
+                    <div class="step-content">
+                        <div class="step-title">Wpisz kod i rozpocznij naukę</div>
+                        <div class="step-description">
+                            Na platformie wpisz otrzymany kod dostępu i ciesz się dostępem do wszystkich 
+                            materiałów kursu oraz społeczności.
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Informacja o e-mailu -->
+                <div class="email-info">
+                    <i class="fa fa-envelope"></i>
+                    <h3 style="margin: 0 0 8px 0; color: var(--bs-dark-900);">E-mail z kodem dostępu</h3>
+                    <p style="margin: 0; color: var(--bs-text);">
+                        Kod dostępu zostanie wysłany w ciągu 5-10 minut. Jeśli nie otrzymasz e-maila, 
+                        sprawdź folder spam lub skontaktuj się z nami.
+                    </p>
+                </div>
+            </div>
+            
+            <!-- Przyciski akcji -->
+            <div class="action-buttons">
+                <a href="https://platforma.korkiai.pl" class="platform-link" target="_blank">
+                    <i class="fa fa-external-link-alt"></i>
+                    Przejdź na platformę
+                </a>
+                <a href="./index.html" class="btn-secondary">
+                    <i class="fa fa-arrow-left"></i>
+                    Wróć do koszyka
+                </a>
+            </div>
+        </main>
+    </body>
+</html>
